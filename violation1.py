@@ -4,6 +4,7 @@ import math
 
 # Video ile ilgili metadatayi txt dosyasindan al
 
+
 def get_metadata(metadata_path):
     detected_boxes_file = open(metadata_path)
     detected_boxes_json_str = detected_boxes_file.read()
