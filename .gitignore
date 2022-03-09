@@ -1,0 +1,12 @@
+# video folders
+videos
+
+# old codes folder
+backup
+.vscode
+__pycache__
+
+# yolo model files
+yolov3.cfg
+yolov3.weights
+coco.names
