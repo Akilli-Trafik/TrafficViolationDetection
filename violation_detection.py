@@ -1,4 +1,3 @@
-import cv2
 import json
 import sys
 import socket
@@ -34,19 +33,23 @@ class Video:
             new_video_file.close()
             new_video_bbox_file.close()
 
+
 def dict_to_video(dict_obj, ctx):
     if dict_obj is None:
         return None
     return Video(dict_obj['video_data'], dict_obj['video_name'], dict_obj['bboxes_data'])
 
+
 class Violation:
     def __init__(self, violation_video_url):
         self.violation_video_url = violation_video_url
+
 
 def violation_to_dict(violation_obj, ctx):
     if violation_obj is None:
         return None
     return {"violation_video_url": violation_obj.violation_video_url}
+
 
 def delivery_report(err, msg):
     if err is not None:
@@ -124,11 +127,13 @@ def main():
                       .format(video_id, type(video_obj.video_data),
                               video_obj.video_name, video_obj.bboxes_data))
                 video_obj.export_here(video_id)
-                violation_name = start_violation_detection_for_video(video_id) #Burası violation yapılan yer
+                violation_name = start_violation_detection_for_video(
+                    video_id)  # Burası violation yapılan yer
                 if violation_name is not None:
                     video_url = upload_to_s3_bucket(video_id, violation_name)
                     violation_obj = Violation(video_url)
-                    producer.produce("d_topic", key=video_id, value=violation_obj, on_delivery=delivery_report)
+                    producer.produce(
+                        "d_topic", key=video_id, value=violation_obj, on_delivery=delivery_report)
         except KeyboardInterrupt:
             break
         except ValueError:

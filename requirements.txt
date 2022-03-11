@@ -1,0 +1,6 @@
+opencv-python==4.5.5.62
+opencv-contrib-python==4.5.5.62
+uuid==1.30
+boto3==1.21.13
+confluent-kafka==1.8.2
+numpy
