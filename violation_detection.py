@@ -41,14 +41,16 @@ def dict_to_video(dict_obj, ctx):
 
 
 class Violation:
-    def __init__(self, violation_video_url):
+    def __init__(self, violation_video_url, violation_vehicle_ids):
         self.violation_video_url = violation_video_url
+        self.violation_vehicle_ids = violation_vehicle_ids
 
 
 def violation_to_dict(violation_obj, ctx):
     if violation_obj is None:
+        print("violation_obj is none")
         return None
-    return {"violation_video_url": violation_obj.violation_video_url}
+    return dict(violation_video_url=violation_obj.violation_video_url, violation_vehicle_ids=violation_obj.violation_vehicle_ids)
 
 
 def delivery_report(err, msg):
@@ -74,11 +76,12 @@ deserializer_schema_str = """
 
 serializer_schema_str = """
 {
-    "namespace": "confluent.io.examples.serialization.mongodb",
+    "namespace": "confluent.io.examples.serialization.mongodbv3",
     "name": "Violation",
     "type": "record",
     "fields": [
-        {"name": "violation_video_url", "type":"string"}
+        {"name": "violation_video_url", "type":"string"},
+        {"name": "violation_vehicle_ids", "type":{"type": "array", "items": "int"}}
     ]
 }
 """
@@ -127,13 +130,15 @@ def main():
                       .format(video_id, type(video_obj.video_data),
                               video_obj.video_name, video_obj.bboxes_data))
                 video_obj.export_here(video_id)
-                violation_name = start_violation_detection_for_video(
-                    video_id)  # Burası violation yapılan yer
+                
+                violation_name, violation_vehicle_ids = start_violation_detection_for_video(video_id)  # Burası violation yapılan yer
+                print("violation_name: {}".format(violation_name))
+                print("violation_vehicle_ids: {}".format(violation_vehicle_ids))
                 if violation_name is not None:
                     video_url = upload_to_s3_bucket(video_id, violation_name)
-                    violation_obj = Violation(video_url)
-                    producer.produce(
-                        "d_topic", key=video_id, value=violation_obj, on_delivery=delivery_report)
+                    violation_obj = Violation(video_url, violation_vehicle_ids)
+                    producer.produce("d_topic", key=video_id, value=violation_obj, on_delivery=delivery_report)
+                
         except KeyboardInterrupt:
             break
         except ValueError:

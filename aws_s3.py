@@ -1,11 +1,16 @@
 # eğer ihlal tespiti yapılırsa object_url linki mongodb'ye diger bilgilerle birlikte kayıt edilecek.
-
+import os
 import boto3
 import mimetypes
 from pathlib import Path
 
+
+def deleteFile(outputString):
+    if os.path.exists(outputString):
+        os.remove(outputString)
+
 def upload_to_s3_bucket(video_id, violation_name):
-    file_url = Path( "received_output/{}.mp4".format(video_id))
+    file_url = Path( "final_output/{}.mp4".format(video_id))
     file_url = str(file_url)
     mimeType, _ = mimetypes.guess_type(
         file_url
@@ -27,4 +32,6 @@ def upload_to_s3_bucket(video_id, violation_name):
         ExtraArgs={"ContentType": mimeType}
 
     )
+
+    deleteFile(file_url)
     return object_url

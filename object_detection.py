@@ -47,13 +47,9 @@ def delivery_report(err, msg):
     print('User record {} successfully produced to {} [{}] at offset {}'.format(
         msg.key(), msg.topic(), msg.partition(), msg.offset()))
 
-
-def bboxList_to_bboxes_data(lst):
-    newList = []
-    for bbox in lst:
-        newList.extend(bbox)
-    return newList
-
+def deleteFile(outputString):
+    if os.path.exists(outputString):
+        os.remove(outputString)
 
 schema_str = """
     {
@@ -93,6 +89,7 @@ def load_to_kafka(outputString, boxes):
         producer.produce("ExampleTopic", key=str(
             uuid4()), value=video_obj, on_delivery=delivery_report)
         video_file.close()
+        deleteFile(outputString)
     except ValueError:
         print("Invalid input, discarding record...")
 
@@ -102,7 +99,7 @@ def detect_objects(img, net, outputLayers):
         608, 608), mean=(0, 0, 0), swapRB=True, crop=False)
     net.setInput(blob)
     outputs = net.forward(outputLayers)
-    return blob, outputs
+    return outputs
 
 
 def get_box_dimensions(outputs, height, width):
@@ -114,7 +111,7 @@ def get_box_dimensions(outputs, height, width):
             scores = detect[5:]
             class_id = np.argmax(scores)
             conf = scores[class_id]
-            if conf > 0.5:
+            if conf > 0.5 and (class_id == 2 or class_id == 3 or class_id == 5 or class_id == 7):
                 center_x = int(detect[0] * width)
                 center_y = int(detect[1] * height)
                 w = int(detect[2] * width)
@@ -144,7 +141,7 @@ def draw_labels(boxes, confs, colors, class_ids, classes, img):
 def image_detect(img_path):
     model, classes, colors, output_layers = load_yolo()
     image, height, width, channels = load_image(img_path)
-    blob, outputs = detect_objects(image, model, output_layers)
+    outputs = detect_objects(image, model, output_layers)
     boxes, confs, class_ids = get_box_dimensions(outputs, height, width)
     print("boxes")
     print(boxes)
@@ -159,13 +156,15 @@ def image_detect(img_path):
             break
 
 
-def center_points(bboxes):
+def center_points(bboxes, tracking_class_ids):
+    counter = 0
     center_points_arr = []
     for bbox in bboxes:
         (x, y, w, h) = bbox
         cx = int((x + x + w) / 2)
         cy = int((y + y + h) / 2)
-        center_points_arr.append((cx, cy, x, y, w, h))
+        center_points_arr.append((cx, cy, x, y, w, h, tracking_class_ids[counter]))
+        counter += 1
     return center_points_arr
 
 
@@ -178,9 +177,8 @@ def crop_bottom_half(image):
 def start_video(video_path):
 
     length_counter = 0
-    MAX_FILE_SIZE = 20000000  # 6MB
+    MAX_FILE_SIZE = 20000000  # 20MB
     model, classes, colors, output_layers = load_yolo()
-    #fourcc = cv2.VideoWriter_fourcc(*'DIVX')
     fourcc = cv2.VideoWriter_fourcc(*'H264')
     cap = cv2.VideoCapture(video_path)
 
@@ -190,11 +188,9 @@ def start_video(video_path):
     frame = cv2.resize(frame, None, fx=0.7, fy=0.7)
 
     height, width, channels = frame.shape
-    print("width: {}".format(width))
-    print("height: {}".format(height))
     cy_frame = int(height/2)
 
-    blob, outputs = detect_objects(frame, model, output_layers)
+    outputs = detect_objects(frame, model, output_layers)
     boxes, confs, class_ids = get_box_dimensions(outputs, height, width)
     indexes = cv2.dnn.NMSBoxes(boxes, confs, 0.5, 0.4)
 
@@ -206,28 +202,34 @@ def start_video(video_path):
 
     tracker = None
     trackers = cv2.legacy.MultiTracker_create()
+    multi_tracker = {}
+    multi_tracker["trackers"] = trackers
 
     tracking_object = {}
     track_id = 0
     first_boxes = []
+    tracking_class_ids = []
     for i in indexes:
         bbox = boxes[i]
+        tracking_class_ids.append(class_ids[i])
         (x, y, w, h) = bbox
         cx = int((x + x + w) / 2)
         cy = int((y + y + h) / 2)
-
-        tracking_object[track_id] = (cx, cy, x, y, w, h)
-        first_boxes.append((track_id, cx, cy, x, y, w, h))
+        tracking_object[track_id] = (cx, cy, x, y, w, h, class_ids[i])
+        first_boxes.append((track_id, cx, cy, x, y, w, h, class_ids[i]))
         track_id += 1
         tracker = cv2.legacy.TrackerMedianFlow_create()
         trackers.add(tracker, frame, tuple(bbox))
+
+    multi_tracker["tracking_class_ids"] = tracking_class_ids
+
+    #multi_tracker = { "trackers": trackers, "tracked_class_ids": [id, id,...]}
 
     all_bbox = []
     frame_counter = 1
     isDetectorWorked = False
     counter = 1
     outputCounter = 1
-    #outputString = "./output/output{}.avi".format(outputCounter)
     outputString = "./output/output{}.mp4".format(outputCounter)
     videoWriter = cv2.VideoWriter(
         outputString, fourcc, 20.0, (width,  height), True)
@@ -235,7 +237,6 @@ def start_video(video_path):
     length_counter += 1
     while True:
         _, frame = cap.read()
-        # frame = crop_bottom_half(frame) # kesilmis kisim
         if _ != True:
             cv2.destroyAllWindows()
             break
@@ -247,23 +248,29 @@ def start_video(video_path):
         if counter % 40 == 0:
             isDetectorWorked = True
             counter = 1
-            blob, outputs = detect_objects(frame, model, output_layers)
+            outputs = detect_objects(frame, model, output_layers)
             boxes, confs, class_ids = get_box_dimensions(
                 outputs, height, width)
             indexes = cv2.dnn.NMSBoxes(boxes, confs, 0.5, 0.4)
             trackers = cv2.legacy.MultiTracker_create()
+            multitracker = {};
+            multi_tracker["trackers"] = trackers
+            tracking_class_ids = []
             for i in indexes:
                 bbox = boxes[i]
+                tracking_class_ids.append(class_ids[i])
                 tracker = cv2.legacy.TrackerMedianFlow_create()
                 trackers.add(tracker, frame, tuple(bbox))
+            multi_tracker["tracking_class_ids"] = tracking_class_ids
         else:
             counter += 1
 
-        success, boxes = trackers.update(frame)
+        #success, boxes = trackers.update(frame)
+        success, boxes = multi_tracker["trackers"].update(frame)
         if(success == False):
             counter = 40
 
-        center_points_cur_frame = center_points(boxes)
+        center_points_cur_frame = center_points(boxes, multi_tracker["tracking_class_ids"])
 
         tracking_obj_copy = tracking_object.copy()
         center_points_cur_frame_copy = center_points_cur_frame.copy()
@@ -273,13 +280,6 @@ def start_video(video_path):
             for pt in center_points_cur_frame_copy:
                 distance = math.hypot(pt2[0]-pt[0], pt2[1] - pt[1])
                 lookup_threshold = pt[4] / 2
-                """
-                if(pt[1] < cy_frame/3):
-                    lookup_threshold = pt[4] / 2
-                elif (pt[1] < 2*cy/3):
-                    lookup_threshold = pt[4] / 2
-                """
-                # print(distance)
                 if distance < lookup_threshold:
                     tracking_object[object_id] = pt
                     objects_exists = True
@@ -301,18 +301,18 @@ def start_video(video_path):
             bbox_list = []
             bbox_list.append((frame_counter,))
             for object_id, pt in tracking_object.items():
-                cx, cy, x, y, w, h = pt
+                cx, cy, x, y, w, h, class_id = pt
                 bbox_list.append((object_id, int(cx), int(
-                    cy), int(x), int(y), int(w), int(h)))
+                    cy), int(x), int(y), int(w), int(h), class_id))
             all_bbox.append(bbox_list)
 
         if firstFrameBoxesController and len(boxes) != 0:
             first_boxes.clear()
             first_boxes.append((frame_counter,))
             for object_ids, pt in tracking_object.items():
-                cx, cy, x, y, w, h = pt
+                cx, cy, x, y, w, h, class_id = pt
                 first_boxes.append((object_ids, int(cx), int(
-                    cy), int(x), int(y), int(w), int(h)))
+                    cy), int(x), int(y), int(w), int(h), class_id))
             all_bbox.append(first_boxes.copy())
             firstFrameBoxesController = False
 
@@ -348,13 +348,14 @@ def start_video(video_path):
             isObjectDetected = True
             isTrackerLost = True
 
+        
         if isObjectDetected:
             videoWriter.write(frame)
 
         # frame uzerinde tespit edilen nesneler cizdirilir.
         for object_id, bbox in tracking_object.items():
             font = cv2.FONT_HERSHEY_PLAIN
-            cx, cy, x, y, w, h = bbox
+            cx, cy, x, y, w, h, class_id= bbox
             # label = str("car")
             color = colors[0]
             cv2.rectangle(frame, (int(x), int(y)),
@@ -362,6 +363,20 @@ def start_video(video_path):
             cv2.circle(frame, (cx, cy), 5, (0, 0, 255), -1)
             cv2.putText(frame, str(object_id),
                         (cx, cy - 7), 0, 1, (0, 0, 255), 2)
+            if class_id == 2:
+                cv2.putText(frame, "car",
+                        (cx - int(w/2), cy- int(h/2)), 0, 1, (255, 0, 0), 2)
+            elif class_id == 3:
+                cv2.putText(frame, "motorbike",
+                        (cx - int(w/2), cy- int(h/2)), 0, 1, (255, 0, 0), 2)
+            elif class_id == 5:
+                cv2.putText(frame, "bus",
+                        (cx - int(w/2), cy- int(h/2)), 0, 1, (255, 0, 0), 2)
+            elif class_id == 7:
+                cv2.putText(frame, "car",
+                        (cx - int(w/2), cy- int(h/2)), 0, 1, (255, 0, 0), 2)
+
+        
             # cv2.putText(frame, label, (int(x), int(y + 30)),
             #            font, 3, color, 3)
 
@@ -378,4 +393,4 @@ def start_video(video_path):
 
 
 # image_detect("insan4.jpg")
-start_video("./videos/video1.mp4")
+start_video("./videos/IMG_5366.MOV")

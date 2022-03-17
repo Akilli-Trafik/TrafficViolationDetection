@@ -1,9 +1,15 @@
+import os
 import cv2
 import json
 import math
 
-# Video ile ilgili metadatayi txt dosyasindan al
+# Delete video file after violation detection
+def deleteFile(videoOutputString, bboxOutputFile):
+    if os.path.exists(videoOutputString) and os.path.exists(bboxOutputFile):
+        os.remove(videoOutputString)
+        os.remove(bboxOutputFile)
 
+# Video ile ilgili metadatayi txt dosyasindan al
 def get_metadata(metadata_path):
     detected_boxes_file = open(metadata_path)
     detected_boxes_json_str = detected_boxes_file.read()
@@ -22,10 +28,11 @@ def center_points(bboxes):
     return center_points_arr
 
 VIOLATION_NAME = "violation1"
+fourcc = cv2.VideoWriter_fourcc(*'H264')
+
 def start_violation_detection_for_video(video_id):
     video_metadata_path = "./received_output/{}.txt".format(video_id)
     video_path = "./received_output/{}.mp4".format(video_id)
-
     # detected_boxes = [
     #    [[frame_numarasi], [id,cx,cy,x,y,w,h], [id,cx,cy,x,y,w,h],...]
     #                   .
@@ -37,7 +44,9 @@ def start_violation_detection_for_video(video_id):
     # Video capture ac, ilk frame'i oku ve frame'i resize et.
     cap = cv2.VideoCapture(video_path)
     ret, frame = cap.read()
-
+    height, width, channels = frame.shape
+    videoWriter = cv2.VideoWriter("./final_output/{}.mp4".format(video_id), fourcc, 20.0, (width,  height), True)
+    
     # Ilk frame'e ait metadata bilgisiyle ilk trackerlar olusturulur
     tracker = None
     trackers = cv2.legacy.MultiTracker_create()
@@ -47,10 +56,10 @@ def start_violation_detection_for_video(video_id):
             for i in range(len(frames)):
                 if i == 0:
                     continue
-                (object_id, cx, cy, x, y, w, h) = frames[i]
+                object_id, cx, cy, x, y, w, h, class_id = frames[i]
                 tracker = cv2.legacy.TrackerMedianFlow_create()
                 trackers.add(tracker, frame, (x, y, w, h))
-                tracking_object[object_id] = (cx, cy, x, y, w, h)
+                tracking_object[object_id] = (cx, cy, x, y, w, h, class_id)
 
     frame_counter = 1  # Frame sayisi
 
@@ -68,11 +77,14 @@ def start_violation_detection_for_video(video_id):
             cv2.destroyAllWindows()
             # violation varsa 
             if (len(violationCars)>0):
-                return VIOLATION_NAME
+                videoWriter.release()
+                cap.release()
+                deleteFile(video_path, video_metadata_path)
+                return (VIOLATION_NAME, tuple(violationCars))
             else:
-                return None # violation yoksa
+                return (None, tuple(violationCars)) # violation yoksa
 
-        height, width, channels = frame.shape
+        
         # Distance'in belirli bolgelere gore degismesi icin gerekli
         cy_frame = int(height/2)
 
@@ -81,7 +93,6 @@ def start_violation_detection_for_video(video_id):
         for frames in detected_boxes:
             if frames[0][0] == frame_counter:  # Eger okunan frame'de tespit yapilmis ise calisir
                 isDetectedInFrame = True
-                print(frame_counter)
                 tracker = None
                 trackers = cv2.legacy.MultiTracker_create()
                 tracking_object.clear()
@@ -89,10 +100,10 @@ def start_violation_detection_for_video(video_id):
                 for i in range(len(frames)):
                     if i == 0:
                         continue
-                    (object_id, cx, cy, x, y, w, h) = frames[i]
+                    object_id, cx, cy, x, y, w, h, class_id = frames[i]
                     tracker = cv2.legacy.TrackerMedianFlow_create()
                     trackers.add(tracker, frame, (x, y, w, h))
-                    tracking_object[object_id] = (cx, cy, x, y, w, h)
+                    tracking_object[object_id] = (cx, cy, x, y, w, h, class_id)
 
         if isDetectedInFrame:
             tracking_object_prev = tracking_object.copy()
@@ -115,15 +126,9 @@ def start_violation_detection_for_video(video_id):
             for pt in center_points_cur_frame_copy:
                 distance = math.hypot(pt2[0]-pt[0], pt2[1] - pt[1])
                 lookup_threshold = pt[4] / 2
-                """
-                if(pt[1] < cy_frame/3):
-                    lookup_threshold = 5
-                elif (pt[1] < 2*cy/3):
-                    lookup_threshold = 15
-                """
-                # print(distance)
+                
                 if distance < lookup_threshold:
-                    tracking_object[object_id] = pt
+                    tracking_object[object_id] = (*pt, pt2[6])
                     objects_exists = True
                     if pt in center_points_cur_frame:
                         center_points_cur_frame.remove(pt)
@@ -134,7 +139,7 @@ def start_violation_detection_for_video(video_id):
             if object in tracking_object_prev:
                 # tracking_object = (cx, cy, x, y, w, h)
                 dist = tracking_object[object][3] - tracking_object_prev[object][3]
-                if dist < -0.05:
+                if dist < -0.1:
                     if object not in hataKontrol:
                         hataKontrol[object] = (True, 1)
 
@@ -157,27 +162,37 @@ def start_violation_detection_for_video(video_id):
         tracking_object_prev = []
         if (count % 5 == 0):  # 10 frame de bir
             tracking_object_prev = tracking_object.copy()
-
+        
         # Son olarak takip edilen objeler ekrana yazdirilir.
         for object_id, bbox in tracking_object.items():
             font = cv2.FONT_HERSHEY_PLAIN
-            cx, cy, x, y, w, h = bbox
+            cx, cy, x, y, w, h, class_id = bbox
             cv2.rectangle(frame, (int(x), int(y)),
                           (int(x + w), int(y + h)), (255, 0, 0), 2)
             cv2.circle(frame, (cx, cy), 5, (0, 0, 255), -1)
             cv2.putText(frame, str(object_id),
                         (cx, cy - 7), 0, 1, (0, 0, 255), 2)
+            if class_id == 2:
+                cv2.putText(frame, "car",
+                        (cx - int(w/2), cy- int(h/2)), 0, 1, (255, 0, 0), 2)
+            elif class_id == 3:
+                cv2.putText(frame, "motorbike",
+                        (cx - int(w/2), cy- int(h/2)), 0, 1, (255, 0, 0), 2)
+            elif class_id == 5:
+                cv2.putText(frame, "bus",
+                        (cx - int(w/2), cy- int(h/2)), 0, 1, (255, 0, 0), 2)
+            elif class_id == 7:
+                cv2.putText(frame, "car",
+                        (cx - int(w/2), cy- int(h/2)), 0, 1, (255, 0, 0), 2)
+
+        videoWriter.write(frame)
 
         cv2.imshow("Tracking", frame)  # frame ekranda gosterilir.
         key = cv2.waitKey(1)  # ESC tusuyla islem sonlandirilabilir.
         if key == 27:
             cv2.destroyAllWindows()
-            # violation varsa 
-            if (len(violationCars)>0):
-                return VIOLATION_NAME
-            else:
-                return None # violation yoksa
+            return None
 
     cap.release()
-    return "violation1"
-    #print(hataKontrol)
+
+# violation_name = start_violation_detection_for_video("6f14e9bd-4c51-488e-9f15-47e6fec61793")
