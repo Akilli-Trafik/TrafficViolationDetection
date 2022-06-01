@@ -1,6 +1,7 @@
 import json
 import sys
 import socket
+import time
 import numpy as np
 from confluent_kafka import DeserializingConsumer, SerializingProducer
 from confluent_kafka.schema_registry import SchemaRegistryClient
@@ -116,10 +117,13 @@ def main():
     consumer.subscribe([args[1]])
 
     while True:
+        
         producer.poll(0.0)
         try:
             # SIGINT can't be handled when polling, limit timeout to 1 second.
+            start_time = time.time()
             msg = consumer.poll(1.0)
+            print("--- %s seconds ---" % (time.time() - start_time))
             if msg is None:
                 continue
             video_obj = msg.value()
@@ -135,10 +139,12 @@ def main():
                 print("violation_name: {}".format(violation_name))
                 print("violation_vehicle_ids: {}".format(violation_vehicle_ids))
                 if violation_name is not None:
+                    
                     video_url = upload_to_s3_bucket(video_id, violation_name)
+                    
                     violation_obj = Violation(video_url, violation_vehicle_ids)
                     producer.produce("d_topic", key=video_id, value=violation_obj, on_delivery=delivery_report)
-                
+                    
         except KeyboardInterrupt:
             break
         except ValueError:

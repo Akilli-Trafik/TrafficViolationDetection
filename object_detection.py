@@ -1,4 +1,5 @@
 import os
+import time
 import math
 import cv2
 import socket
@@ -111,7 +112,7 @@ def get_box_dimensions(outputs, height, width):
             scores = detect[5:]
             class_id = np.argmax(scores)
             conf = scores[class_id]
-            if conf > 0.5 and (class_id == 2 or class_id == 3 or class_id == 5 or class_id == 7):
+            if conf > 0.5:
                 center_x = int(detect[0] * width)
                 center_y = int(detect[1] * height)
                 w = int(detect[2] * width)
@@ -143,12 +144,12 @@ def image_detect(img_path):
     image, height, width, channels = load_image(img_path)
     outputs = detect_objects(image, model, output_layers)
     boxes, confs, class_ids = get_box_dimensions(outputs, height, width)
-    print("boxes")
-    print(boxes)
-    print("confs")
-    print(confs)
-    print("class_ids")
-    print(class_ids)
+    # print("boxes")
+    # print(boxes)
+    # print("confs")
+    # print(confs)
+    # print("class_ids")
+    # print(class_ids)
     draw_labels(boxes, confs, colors, class_ids, classes, image)
     while True:
         key = cv2.waitKey(1)
@@ -321,8 +322,8 @@ def start_video(video_path):
             file_stats = os.stat(outputString)
             # video sonu.
             if(file_stats.st_size >= MAX_FILE_SIZE or length_counter == video_length):
-                print("length_counter: {}".format(length_counter))
-                print("video_length: {}", format(video_length))
+                # print("length_counter: {}".format(length_counter))
+                # print("video_length: {}", format(video_length))
                 isFileMaxSize = True
 
         if (len(boxes) == 0 and isTrackerLost) or isFileMaxSize:
@@ -331,7 +332,9 @@ def start_video(video_path):
             videoWriter.release()
 
             # first_boxes yerine all_bbox
+            start_time = time.time()
             load_to_kafka(outputString, all_bbox)
+            print("--- %s seconds ---" % (time.time() - start_time))
             frame_counter = 1
             all_bbox = []
 
@@ -393,4 +396,5 @@ def start_video(video_path):
 
 
 # image_detect("insan4.jpg")
+
 start_video("./videos/IMG_5366.MOV")
